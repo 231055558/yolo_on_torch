@@ -80,6 +80,9 @@ class BaseModule(nn.Module):
         if is_top_level_module:
             self._log_init_info()
 
+            for sub_module in self.modules():
+                del sub_module._params_init_info
+
     def apply_initialization(self, init_cfgs):
         """Apply initialization based on provided configurations."""
         for init_cfg in init_cfgs:
