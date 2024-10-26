@@ -4,12 +4,14 @@ import torch.nn as nn
 from model.basemodule import BaseModule
 from model.csp_darknet import YOLOv8CSPDarknet
 from model.yolov8_pafpn import YOLOv8PAFPN
+from model.yolov8_head import YOLOv8Head
 # 假设你有一个模型类
 class Detector(BaseModule):
     def __init__(self):
         super().__init__(None)
         self.backbone = YOLOv8CSPDarknet()
         self.neck = YOLOv8PAFPN([256, 512, 512], [256, 512, 512])
+        self.bbox_head = YOLOv8Head(80, [256, 512, 512])
 
 model = Detector()
 # neck = YOLOv8PAFPN([256, 512, 1024], [256, 512, 1024])  # 实例化模型

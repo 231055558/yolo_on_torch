@@ -174,7 +174,7 @@ class YOLOv8HeadModule(BaseModule):
             in_channels.append(channel)
         self.in_channels = in_channels
 
-        self._init_layer()
+        self._init_layers()
 
     def _init_layers(self):
         self.cls_preds = nn.ModuleList()
@@ -183,7 +183,7 @@ class YOLOv8HeadModule(BaseModule):
         reg_out_channels = max(
             (16, self.in_channels[0] // 4, self.reg_max * 4)
         )
-        cls_out_channels = max(self.in_channels[0], self.num)
+        cls_out_channels = max(self.in_channels[0], self.num_classes)
 
         for i in range(self.num_levels):
             self.reg_preds.append(
@@ -283,11 +283,11 @@ class YOLOv8Head(BaseModule):
                  init_cfg: Optional[dict] = None):
         super().__init__(init_cfg=init_cfg)
         self._raw_positive_infos = dict()
-        self.head_module = YOLOv8Head(num_classes=num_classes,
-                                      in_channels=in_channels,
-                                      widen_factor=widen_factor,
-                                      featmap_strides=featmap_strides,
-                                      reg_max=reg_max)
+        self.head_module = YOLOv8HeadModule(num_classes=num_classes,
+                                            in_channels=in_channels,
+                                            widen_factor=widen_factor,
+                                            featmap_strides=featmap_strides,
+                                            reg_max=reg_max)
         self.num_classes = self.head_module.num_classes
         self.featmap_strides = self.head_module.featmap_strides
         self.num_levels = len(self.featmap_strides)
