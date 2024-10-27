@@ -159,9 +159,9 @@ class YOLOv8CSPDarknet(BaseModule):
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         """Forward pass through the backbone."""
         outputs = []
-        x = self.stem(x)
-        for i, stage in enumerate(self.stages):
-            x = stage(x)
+        for i, layer_name in enumerate(self.layers):
+            layer = getattr(self, layer_name)
+            x = layer(x)
             if i in self.out_indices:
                 outputs.append(x)
-        return outputs
+        return tuple(outputs)

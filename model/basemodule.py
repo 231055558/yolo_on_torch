@@ -7,11 +7,7 @@ from abc import ABCMeta, abstractmethod
 import torch.nn as nn
 from torch import Tensor
 
-class InstanceData:
-    pass
 
-class ConfigDict:
-    pass
 
 class BaseModule(nn.Module):
     """Base module for all modules with parameter initialization functionality.

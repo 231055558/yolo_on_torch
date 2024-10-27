@@ -1,3 +1,4 @@
+import numpy as np
 import torch.nn as nn
 import torch
 
@@ -363,3 +364,89 @@ def get_rank(group = None) -> int:
 def is_distributed() -> bool:
     """Return True if distributed environment has been initialized."""
     return torch_dist.is_available() and torch_dist.is_initialized()
+
+def filter_scores_and_topk(
+        scores: torch.Tensor,
+        score_thr: float,
+        nms_pre: int,
+        results: Dict[str, torch.Tensor] = None
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
+    """
+    过滤掉低于置信度阈值的检测结果，并保留前 k 个分数最高的结果。
+
+    Args:
+        scores (Tensor): 形状为 (num_instances, 1) 的置信度分数。
+        score_thr (float): 置信度阈值，低于该值的检测结果会被过滤。
+        nms_pre (int): 保留的前 n 个高置信度结果。
+        results (dict, optional): 其他检测结果的字典，比如 labels。默认为 None。
+
+    Returns:
+        scores (Tensor): 过滤后的分数，形状为 (num_filtered_instances,).
+        labels (Tensor): 对应的类别标签。
+        keep_idxs (Tensor): 保留的结果的索引。
+        results (dict): 更新后的其他检测结果字典。
+    """
+    # 根据置信度阈值筛选分数
+    valid_mask = scores > score_thr
+    valid_scores = scores[valid_mask]
+
+    if results is not None:
+        for key, value in results.items():
+            results[key] = value[valid_mask]
+
+    # 如果过滤后结果数大于 nms_pre，取前 nms_pre 个
+    if len(valid_scores) > nms_pre:
+        topk_scores, keep_idxs = valid_scores.topk(nms_pre, sorted=False)
+        valid_scores = topk_scores
+        if results is not None:
+            for key, value in results.items():
+                results[key] = value[keep_idxs]
+    else:
+        keep_idxs = torch.nonzero(valid_mask, as_tuple=True)[0]
+
+    return valid_scores, keep_idxs, results
+
+def to_tensor(
+    data: Union[torch.Tensor, np.ndarray, Sequence, int,
+                float]) -> torch.Tensor:
+    """Convert objects of various python types to :obj:`torch.Tensor`.
+
+    Supported types are: :class:`numpy.ndarray`, :class:`torch.Tensor`,
+    :class:`Sequence`, :class:`int` and :class:`float`.
+
+    Args:
+        data (torch.Tensor | numpy.ndarray | Sequence | int | float): Data to
+            be converted.
+
+    Returns:
+        torch.Tensor: the converted data.
+    """
+
+    if isinstance(data, torch.Tensor):
+        return data
+    elif isinstance(data, np.ndarray):
+        return torch.from_numpy(data)
+    elif isinstance(data, Sequence) and not isinstance(data, str):
+        return torch.tensor(data)
+    elif isinstance(data, int):
+        return torch.LongTensor([data])
+    elif isinstance(data, float):
+        return torch.FloatTensor([data])
+    else:
+        raise TypeError(f'type {type(data)} cannot be converted to tensor.')
+
+def is_cuda_available() -> bool:
+    """Returns True if cuda devices exist."""
+    return torch.cuda.is_available()
+
+def get_device() -> str:
+    """Returns the currently existing device type.
+
+    Returns:
+        str: cuda | npu | mlu | mps | musa | cpu.
+    """
+    DEVICE = 'cpu'
+    if is_cuda_available():
+        DEVICE = 'cuda'
+    return DEVICE
+
