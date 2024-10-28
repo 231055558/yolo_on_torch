@@ -154,11 +154,10 @@ for box, label, score in zip(boxes, labels, scores):
     x1, y1, x2, y2 = box.int().tolist()
 
     # 绘制检测框（蓝色框，厚度为2）
-    cv2.rectangle(img, (x1, y1), (x2, y2), color=(255, 0, 0), thickness=2)
+    cv2.rectangle(image, (x1, y1), (x2, y2), color=(255, 0, 0), thickness=2)
 
     # 构造标签文本，包括类别和置信度分数
     label_text = f'{int(label)}: {score:.2f}'
-
     # 在检测框的左上角写入标签文本（白色文字，字体大小0.5）
     cv2.putText(image, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
                 0.5, (255, 255, 255), thickness=1)
