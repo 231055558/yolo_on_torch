@@ -1,13 +1,15 @@
 import numpy as np
 import torch.nn as nn
 import torch
-
-from typing import Dict, Optional, Tuple, Union, Sequence
+from typing import Dict, Optional, Tuple, Union, Sequence, List
 import math
 from functools import partial
-
 from torch import Tensor
 from torch import distributed as torch_dist
+import torch.nn.functional as F
+
+from base.basebbox import BaseBoxes
+
 
 def kaiming_init(module,
                  a=0,
@@ -365,46 +367,54 @@ def is_distributed() -> bool:
     """Return True if distributed environment has been initialized."""
     return torch_dist.is_available() and torch_dist.is_initialized()
 
-def filter_scores_and_topk(
-        scores: torch.Tensor,
-        score_thr: float,
-        nms_pre: int,
-        results: Dict[str, torch.Tensor] = None
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
-    """
-    过滤掉低于置信度阈值的检测结果，并保留前 k 个分数最高的结果。
+
+def filter_scores_and_topk(scores, score_thr, topk, results=None):
+    """Filter results using score threshold and topk candidates.
 
     Args:
-        scores (Tensor): 形状为 (num_instances, 1) 的置信度分数。
-        score_thr (float): 置信度阈值，低于该值的检测结果会被过滤。
-        nms_pre (int): 保留的前 n 个高置信度结果。
-        results (dict, optional): 其他检测结果的字典，比如 labels。默认为 None。
+        scores (Tensor): The scores, shape (num_bboxes, K).
+        score_thr (float): The score filter threshold.
+        topk (int): The number of topk candidates.
+        results (dict or list or Tensor, Optional): The results to
+           which the filtering rule is to be applied. The shape
+           of each item is (num_bboxes, N).
 
     Returns:
-        scores (Tensor): 过滤后的分数，形状为 (num_filtered_instances,).
-        labels (Tensor): 对应的类别标签。
-        keep_idxs (Tensor): 保留的结果的索引。
-        results (dict): 更新后的其他检测结果字典。
+        tuple: Filtered results
+
+            - scores (Tensor): The scores after being filtered, \
+                shape (num_bboxes_filtered, ).
+            - labels (Tensor): The class labels, shape \
+                (num_bboxes_filtered, ).
+            - anchor_idxs (Tensor): The anchor indexes, shape \
+                (num_bboxes_filtered, ).
+            - filtered_results (dict or list or Tensor, Optional): \
+                The filtered results. The shape of each item is \
+                (num_bboxes_filtered, N).
     """
-    # 根据置信度阈值筛选分数
     valid_mask = scores > score_thr
-    valid_scores = scores[valid_mask]
+    scores = scores[valid_mask]
+    valid_idxs = torch.nonzero(valid_mask)
 
+    num_topk = min(topk, valid_idxs.size(0))
+    # torch.sort is actually faster than .topk (at least on GPUs)
+    scores, idxs = scores.sort(descending=True)
+    scores = scores[:num_topk]
+    topk_idxs = valid_idxs[idxs[:num_topk]]
+    keep_idxs, labels = topk_idxs.unbind(dim=1)
+
+    filtered_results = None
     if results is not None:
-        for key, value in results.items():
-            results[key] = value[valid_mask]
-
-    # 如果过滤后结果数大于 nms_pre，取前 nms_pre 个
-    if len(valid_scores) > nms_pre:
-        topk_scores, keep_idxs = valid_scores.topk(nms_pre, sorted=False)
-        valid_scores = topk_scores
-        if results is not None:
-            for key, value in results.items():
-                results[key] = value[keep_idxs]
-    else:
-        keep_idxs = torch.nonzero(valid_mask, as_tuple=True)[0]
-
-    return valid_scores, keep_idxs, results
+        if isinstance(results, dict):
+            filtered_results = {k: v[keep_idxs] for k, v in results.items()}
+        elif isinstance(results, list):
+            filtered_results = [result[keep_idxs] for result in results]
+        elif isinstance(results, torch.Tensor):
+            filtered_results = results[keep_idxs]
+        else:
+            raise NotImplementedError(f'Only supports dict or list or Tensor, '
+                                      f'but get {type(results)}.')
+    return scores, labels, keep_idxs, filtered_results
 
 def to_tensor(
     data: Union[torch.Tensor, np.ndarray, Sequence, int,
@@ -450,3 +460,152 @@ def get_device() -> str:
         DEVICE = 'cuda'
     return DEVICE
 
+def stack_batch(tensor_list: List[torch.Tensor],
+                pad_size_divisor: int = 1,
+                pad_value: Union[int, float] = 0) -> torch.Tensor:
+    """Stack multiple tensors to form a batch and pad the tensor to the max
+    shape use the right bottom padding mode in these images. If
+    ``pad_size_divisor > 0``, add padding to ensure the shape of each dim is
+    divisible by ``pad_size_divisor``.
+
+    Args:
+        tensor_list (List[Tensor]): A list of tensors with the same dim.
+        pad_size_divisor (int): If ``pad_size_divisor > 0``, add padding
+            to ensure the shape of each dim is divisible by
+            ``pad_size_divisor``. This depends on the model, and many
+            models need to be divisible by 32. Defaults to 1
+        pad_value (int, float): The padding value. Defaults to 0.
+
+    Returns:
+       Tensor: The n dim tensor.
+    """
+    assert isinstance(
+        tensor_list,
+        list), (f'Expected input type to be list, but got {type(tensor_list)}')
+    assert tensor_list, '`tensor_list` could not be an empty list'
+    assert len({
+        tensor.ndim
+        for tensor in tensor_list
+    }) == 1, (f'Expected the dimensions of all tensors must be the same, '
+              f'but got {[tensor.ndim for tensor in tensor_list]}')
+
+    dim = tensor_list[0].dim()
+    num_img = len(tensor_list)
+    all_sizes: torch.Tensor = torch.Tensor(
+        [tensor.shape for tensor in tensor_list])
+    max_sizes = torch.ceil(
+        torch.max(all_sizes, dim=0)[0] / pad_size_divisor) * pad_size_divisor
+    padded_sizes = max_sizes - all_sizes
+    # The first dim normally means channel,  which should not be padded.
+    padded_sizes[:, 0] = 0
+    if padded_sizes.sum() == 0:
+        return torch.stack(tensor_list)
+    # `pad` is the second arguments of `F.pad`. If pad is (1, 2, 3, 4),
+    # it means that padding the last dim with 1(left) 2(right), padding the
+    # penultimate dim to 3(top) 4(bottom). The order of `pad` is opposite of
+    # the `padded_sizes`. Therefore, the `padded_sizes` needs to be reversed,
+    # and only odd index of pad should be assigned to keep padding "right" and
+    # "bottom".
+    pad = torch.zeros(num_img, 2 * dim, dtype=torch.int)
+    pad[:, 1::2] = padded_sizes[:, range(dim - 1, -1, -1)]
+    batch_tensor = []
+    for idx, tensor in enumerate(tensor_list):
+        batch_tensor.append(
+            F.pad(tensor, tuple(pad[idx].tolist()), value=pad_value))
+    return torch.stack(batch_tensor)
+
+try:
+    from torchvision.ops import nms as torchvision_nms
+    has_torchvision_nms = True
+except ImportError:
+    has_torchvision_nms = False
+
+
+def nms(boxes: np.ndarray,
+        scores: np.ndarray,
+        iou_threshold: float,
+        offset: int = 0,
+        score_threshold: float = 0,
+        max_num: int = -1) -> Tuple[np.ndarray, np.ndarray]:
+    """Dispatch to either CPU or GPU NMS implementations.
+
+    The input can be either torch tensor or numpy array. GPU NMS will be used
+    if the input is a GPU tensor, otherwise CPU NMS
+    will be used. The returned type will always be the same as inputs.
+
+    Arguments:
+        boxes (np.ndarray): boxes in shape (N, 4).
+        scores (np.ndarray): scores in shape (N, ).
+        iou_threshold (float): IoU threshold for NMS.
+        offset (int, 0 or 1): boxes' width or height is (x2 - x1 + offset).
+        score_threshold (float): score threshold for NMS.
+        max_num (int): maximum number of boxes after NMS.
+
+    Returns:
+        tuple: kept dets (boxes and scores) and indices, which always have
+        the same data type as the input.
+    """
+    assert isinstance(boxes, (Tensor, np.ndarray))
+    assert isinstance(scores, (Tensor, np.ndarray))
+
+    is_numpy = False
+    if isinstance(boxes, np.ndarray):
+        is_numpy = True
+        boxes = torch.from_numpy(boxes)
+    if isinstance(scores, np.ndarray):
+        scores = torch.from_numpy(scores)
+
+    assert boxes.size(1) == 4
+    assert boxes.size(0) == scores.size(0)
+    assert offset in (0, 1)
+
+    # 根据 torchvision 版本选择 NMS 方法
+    if has_torchvision_nms:
+        # 新版本 PyTorch 兼容方式
+        inds = torchvision_nms(boxes, scores, iou_threshold)
+    else:
+        # 旧版本兼容处理方式
+        # 检查是否使用旧的 torch.ops.torchvision.nms 调用方式
+        if hasattr(torch.ops, 'torchvision') and hasattr(torch.ops.torchvision, 'nms'):
+            inds = torch.ops.torchvision.nms(boxes, scores, iou_threshold)
+        else:
+            raise ImportError("NMS function is not available in this version of torchvision or torch.")
+
+    # 进行 score 阈值筛选
+    if score_threshold > 0:
+        inds = inds[scores[inds] > score_threshold]
+
+    # 进行最大数量筛选
+    if max_num > 0:
+        inds = inds[:max_num]
+
+    # 获取筛选后的检测框和分数
+    dets = torch.cat((boxes[inds], scores[inds].reshape(-1, 1)), dim=1)
+
+    if is_numpy:
+        dets = dets.cpu().numpy()
+        inds = inds.cpu().numpy()
+
+    return dets, inds
+
+def add_pred_to_datasample(data_samples,
+                           results_list):
+    for data_sample, pred_instances in zip(data_samples, results_list):
+        data_sample.pred_instances = pred_instances
+    samplelist_boxtype2tensor(data_samples)
+    return data_samples
+
+def samplelist_boxtype2tensor(batch_data_samples):
+    for data_samples in batch_data_samples:
+        if 'gt_instances' in data_samples:
+            bboxes = data_samples.gt_instances.get('bboxes', None)
+            if isinstance(bboxes, BaseBoxes):
+                data_samples.gt_instances.bboxes = bboxes.tensor
+        if 'pred_instances' in data_samples:
+            bboxes = data_samples.pred_instances.get('bboxes', None)
+            if isinstance(bboxes, BaseBoxes):
+                data_samples.pred_instances.bboxes = bboxes.tensor
+        if 'ignored_instances' in data_samples:
+            bboxes = data_samples.ignored_instances.get('bboxes', None)
+            if isinstance(bboxes, BaseBoxes):
+                data_samples.ignored_instances.bboxes = bboxes.tensor
