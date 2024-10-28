@@ -233,8 +233,8 @@ class YOLOv8PAFPN(BaseYOLONeck):
             nn.Module: The downsample layer.
         """
         return ConvModule(
-            self.in_channels[idx],
-            self.in_channels[idx],
+            make_divisible(self.in_channels[idx], self.widen_factor),
+            make_divisible(self.in_channels[idx], self.widen_factor),
             kernel_size=3,
             stride=2,
             padding=1,

@@ -11,6 +11,9 @@ from model.csp_darknet import YOLOv8CSPDarknet
 from model.yolov8_pafpn import YOLOv8PAFPN
 from model.yolov8_head import YOLOv8Head
 from utils import stack_batch, add_pred_to_datasample
+import cv2
+
+
 
 
 class DataSample:
@@ -50,8 +53,8 @@ class DataSample:
 class Detector(BaseModule):
     def __init__(self):
         super().__init__(None)
-        self.backbone = YOLOv8CSPDarknet()
-        self.neck = YOLOv8PAFPN([256, 512, 512], [256, 512, 512])
+        self.backbone = YOLOv8CSPDarknet(deepen_factor=1.0, widen_factor=1.0, last_stage_out_channels=512)
+        self.neck = YOLOv8PAFPN([256, 512, 512], [256, 512, 512],deepen_factor=1.0, widen_factor=1.0)
         head_cfg = {'multi_label': True, 'nms_pre': 30000, 'score_thr': 0.001,
                     'nms': {'type': 'nms', 'iou_threshold': 0.7}, 'max_per_img': 300}
         self.bbox_head = YOLOv8Head(80, [256, 512, 512], test_cfg={'multi_label': True, 'nms_pre': 30000, 'score_thr': 0.001, 'nms': {'type': 'nms', 'iou_threshold': 0.7}, 'max_per_img': 300})
@@ -65,6 +68,7 @@ class Detector(BaseModule):
 
     def predict(self, x, data_sample):
         x = preprocess_image(x, mean=[0.0, 0.0, 0.0], std=[255.0, 255.0, 255.0], bgr_to_rgb=True)
+
         x = self.backbone(x)
         x = self.neck(x)
         result = self.bbox_head.predict(x, data_sample)
@@ -75,13 +79,13 @@ model = Detector()
 
 ckp_path = './checkpoint/yolov8_l_syncbn_fast_8xb16-500e_coco_20230217_182526-189611b6.pth'
 # # 假设权重文件路径为 'path_to_weights.pth'
-checkpoint = torch.load('./checkpoint/yolov8_s_syncbn_fast_8xb16-500e_coco_20230117_180101-5aa5f0f1.pth', map_location='cpu')
-
-# 如果是直接保存的模型状态字典
-if 'state_dict' in checkpoint:
-    state_dict = checkpoint['state_dict']
-else:
-    state_dict = checkpoint
+# checkpoint = torch.load('./checkpoint/yolov8_s_syncbn_fast_8xb16-500e_coco_20230117_180101-5aa5f0f1.pth', map_location='cpu')
+#
+# # 如果是直接保存的模型状态字典
+# if 'state_dict' in checkpoint:
+#     state_dict = checkpoint['state_dict']
+# else:
+#     state_dict = checkpoint
 
 
 
@@ -134,7 +138,7 @@ results = results.cpu()
 pred_instances = results.pred_instances
 if 'scores' in pred_instances:
     pred_instances = pred_instances[
-        pred_instances.scores > 0].cpu()
+        pred_instances.scores > 0.5].cpu()
 
 
 boxes = pred_instances.bboxes  # tensor of shape (N, 4) with [x1, y1, x2, y2]
