@@ -13,62 +13,18 @@ from model.yolov8_head import YOLOv8Head
 from utils import stack_batch, add_pred_to_datasample
 import cv2
 
-
-
-
-class DataSample:
-    def __init__(self, metainfo=None):
-        """
-        自定义数据样本类，用于模拟 mmdet.structures 中的 DetDataSample 类。
-
-        Args:
-            metainfo (dict): 图像的元信息，默认为 None。
-        """
-        # 用于存储图像的元数据，比如原始尺寸、比例因子等
-        self.metainfo = metainfo if metainfo is not None else {}
-
-    def set_metainfo(self, key, value):
-        """
-        设置 metainfo 中的键值对。
-
-        Args:
-            key (str): 元信息的键名。
-            value (any): 元信息的值。
-        """
-        self.metainfo[key] = value
-
-    def get_metainfo(self, key, default=None):
-        """
-        获取 metainfo 中的值。
-
-        Args:
-            key (str): 元信息的键名。
-            default (any): 如果键不存在，则返回的默认值。
-
-        Returns:
-            any: 对应的元信息值。
-        """
-        return self.metainfo.get(key, default)
 # 假设你有一个模型类
 class Detector(BaseModule):
     def __init__(self):
         super().__init__(None)
         self.backbone = YOLOv8CSPDarknet(deepen_factor=1.0, widen_factor=1.0, last_stage_out_channels=512)
         self.neck = YOLOv8PAFPN([256, 512, 512], [256, 512, 512],deepen_factor=1.0, widen_factor=1.0)
-        head_cfg = {'multi_label': True, 'nms_pre': 30000, 'score_thr': 0.001,
-                    'nms': {'type': 'nms', 'iou_threshold': 0.7}, 'max_per_img': 300}
+        # head_cfg = {'multi_label': True, 'nms_pre': 30000, 'score_thr': 0.001,
+        #             'nms': {'type': 'nms', 'iou_threshold': 0.7}, 'max_per_img': 300}
         self.bbox_head = YOLOv8Head(80, [256, 512, 512], test_cfg={'multi_label': True, 'nms_pre': 30000, 'score_thr': 0.001, 'nms': {'type': 'nms', 'iou_threshold': 0.7}, 'max_per_img': 300})
-    def forward(self, x):
-        batch_size = x.shape[0]
-        batch_data_samples = [DataSample() for _ in range(batch_size)]
-        x = self.backbone(x)
-        x = self.neck(x)
-        x = self.bbox_head.predict(x, batch_size_sample=batch_data_samples, rescale=True)
-        return x
 
     def predict(self, x, data_sample):
         x = preprocess_image(x, mean=[0.0, 0.0, 0.0], std=[255.0, 255.0, 255.0], bgr_to_rgb=True)
-
         x = self.backbone(x)
         x = self.neck(x)
         result = self.bbox_head.predict(x, data_sample)
@@ -112,7 +68,7 @@ def load_weights_with_mapping(model, weight_path):
 model = load_weights_with_mapping(model, ckp_path)
 
 # 指定输入图片的路径
-image_path = './demo/demo.jpg'  # 替换为你的图片路径
+image_path = './data/dota/train/images/P0000__1024__824___0.tiff'  # 替换为你的图片路径
 image = cv2.imread(image_path)
 transforms = []
 

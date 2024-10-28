@@ -22,8 +22,8 @@ def make_dataset(dir, max_dataset_size=float("inf")):
     return images[:min(max_dataset_size, len(images))]
 
 class Dtdatasets():
-    def __init__(self, args):
-        self.data_root = args.data_root
+    def __init__(self):
+        self.data_root = './data/coco/'
 
         self.load_size = 1024
         self.crop_size = 256
@@ -32,7 +32,7 @@ class Dtdatasets():
         self.red_nc = 1
 
         self.dir = os.path.join(self.data_root, 'train')
-        self.mode = args.mode
+        self.mode = 'rgb'
 
         self.dir_rgb = sorted(make_dataset(os.path.join(self.dir, 'rgb')))
         self.dir_red = sorted(make_dataset(os.path.join(self.dir, 'red')))
@@ -43,6 +43,8 @@ class Dtdatasets():
             img_path = self.dir_rgb[index]
             img = Image.open(img_path).convert('RGB')
             return {'img': img}
+
+
         elif self.mode=='red':
             img_path = self.dir_red[index]
             img = Image.open(img_path).convert('RGB')
@@ -61,6 +63,8 @@ class Dtdatasets():
             return len(self.dir_red)
         elif self.mode=='rgb_red':
             return len(self.dir_rgb) + len(self.dir_red)
+
+
 
 
 

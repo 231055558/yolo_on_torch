@@ -1,6 +1,10 @@
 from torch import nn
 import torch.nn.functional as F
 
+from loss.weight_loss import weighted_loss
+
+
+@weighted_loss
 def distribution_focal_loss(pred, label):
     r"""Distribution Focal Loss (DFL) is from `Generalized Focal Loss: Learning
     Qualified and Distributed Bounding Boxes for Dense Object Detection
