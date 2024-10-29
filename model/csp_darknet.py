@@ -165,3 +165,11 @@ class YOLOv8CSPDarknet(BaseModule):
             if i in self.out_indices:
                 outputs.append(x)
         return tuple(outputs)
+
+    def init_weights(self):
+        if self.init_cfg is None:
+            for m in self.modules():
+                if isinstance(m, nn.Conv2d):
+                    m.reset_parameters()
+        else:
+            super().init_weight()

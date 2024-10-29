@@ -18,7 +18,11 @@ from model.basemodule import BaseModule
 from model.networks import ConvModule
 from utils import make_divisible, multi_apply, gt_instances_preprocess, get_dist_info, filter_scores_and_topk, nms
 from task_modules.assigners.batch_task_aligned_assigner import BatchTaskAlignedAssigner
-
+def constant_init(module, val, bias=0):
+    if hasattr(module, 'weight') and module.weight is not None:
+        nn.init.constant_(module.weight, val)
+    if hasattr(module, 'bias') and module.bias is not None:
+        nn.init.constant_(module.bias, bias)
 # class YOLOv8HeadModule(BaseModule):
 #     """YOLOv8HeadModule head module used in `YOLOv8`.
 #
@@ -350,11 +354,15 @@ class YOLOv8Head(BaseModule):
             self.flatten_priors_train = None
             self.stride_tensor = None
 
-    def init_weights(self):
-        super().init_weights()
 
     def forward(self, x):
         return self.head_module(x)
+
+    def init_weights(self):
+        super().init_weights()
+        for m in self.modules():
+            if hasattr(m, 'conv_offset'):
+                constant_init(m.conv_offset, 0)
 
     def loss(self, x, batch_data_samples):
         outs = self(x)

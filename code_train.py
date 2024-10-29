@@ -24,7 +24,7 @@ class Detector(BaseModule):
                                     train_cfg={'assigner': {'type': 'BatchTaskAlignedAssigner', 'num_classes': 80, 'use_ciou': True, 'topk': 10, 'alpha': 0.5, 'beta': 6.0, 'eps': 1e-09}})
 
     def set_train(self):
-        optim_wrapper_config = {'type': 'OptimWrapper', 'clip_grad': {'max_norm': 10.0}, 'optimizer': {'type': 'SGD', 'lr': 0.01, 'momentum': 0.937, 'weight_decay': 0.0005, 'nesterov': True, 'batch_size_per_gpu': 4}}
+        optim_wrapper_config = {'type': 'OptimWrapper', 'clip_grad': {'max_norm': 10.0}, 'optimizer': {'type': 'SGD', 'lr': 0.1, 'momentum': 0.937, 'weight_decay': 0.0005, 'nesterov': True, 'batch_size_per_gpu': 1}}
 
         self.optim_wrapper = YOLOv5OptimizerConstructor(optim_wrapper_cfg=optim_wrapper_config,
                                                         paramwise_cfg=None)(self)
@@ -58,11 +58,39 @@ def load_weights_with_mapping(model, weight_path):
     model.load_state_dict(model_weights, strict=False)
     return model
 
-def train(data_id):
+def adjust_bboxes_tensor(bboxes, ori_shape, img_shape):
+    """
+    Adjust bounding boxes based on image scaling for a specific tensor format.
 
-    model = Detector()
+    Args:
+        bboxes (torch.Tensor): Tensor of bounding boxes with the format [image_id, class_id, x_min, y_min, x_max, y_max].
+        ori_shape (tuple): Original image dimensions as (width, height).
+        img_shape (tuple): New image dimensions as (width, height, channels).
 
-    model.set_train()
+    Returns:
+        torch.Tensor: Adjusted bounding boxes tensor.
+    """
+    ori_w, ori_h = ori_shape
+    new_w, new_h = img_shape[:2]
+
+    # Calculate scale factors for width and height
+    scale_x = new_w / ori_w
+    scale_y = new_h / ori_h
+
+    # Only adjust the x_min, y_min, x_max, y_max columns (indices 2 to 5)
+    adjusted_bboxes = bboxes.clone()  # Copy to avoid modifying the original tensor
+    adjusted_bboxes[:, 2] *= scale_x  # x_min
+    adjusted_bboxes[:, 3] *= scale_y  # y_min
+    adjusted_bboxes[:, 4] *= scale_x  # x_max
+    adjusted_bboxes[:, 5] *= scale_y  # y_max
+
+    return adjusted_bboxes
+
+
+
+def train(model, data_id):
+
+
 
 
     # 指定输入图片的路径
@@ -90,7 +118,7 @@ def train(data_id):
         data_samples.metainfo for data_samples in data_['data_samples']
     ]
     instance_data = parse_bbox_from_file(annfile_path)
-
+    instance_data = adjust_bboxes_tensor(instance_data, data_samples['img_metas'][0]['ori_shape'], data_samples['img_metas'][0]['img_shape'])
     data_samples['bboxes_labels'] = instance_data
 
     results = model(data_['inputs'], data_samples)
@@ -112,9 +140,14 @@ def get_image_names(folder_path):
 
     return image_names
 if __name__ == '__main__':
+    model = Detector()
+    model.init_weights()
+    weight_path = './checkpoint/yolov8_l_syncbn_fast_8xb16-500e_coco_20230217_182526-189611b6.pth'
+    # model = load_weights_with_mapping(model, weight_path=weight_path)
+    model.set_train()
     for i in get_image_names('./data/coco/val2017'):
         try:
-            train(i)
+            train(model, i)
         except:
-            continue
+            print('not found')
 

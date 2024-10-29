@@ -45,6 +45,9 @@ class BaseModule(nn.Module):
                     f'of {self.__class__.__name__}')
                 self._params_init_info[param]['tmp_mean_value'] = param.data.mean().item()
 
+            for sub_module in self.modules():
+                sub_module._params_init_info = self._params_init_info
+
         module_name = self.__class__.__name__
         if not self._is_init:
             if self.init_cfg:
@@ -72,6 +75,12 @@ class BaseModule(nn.Module):
                 logging.warning(f'No `init_cfg` provided for {module_name}, using default initialization.')
         else:
             logging.warning(f'init_weights of {module_name} has been called more than once.')
+
+        for m in self.children():
+            if hasattr(m, 'init_weights') and not getattr(
+                    m, 'is_init', False):
+                m.init_weights()
+
 
         if is_top_level_module:
             self._log_init_info()

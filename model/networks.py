@@ -196,6 +196,7 @@ class ConvModule(nn.Module):
             elif layer == 'act' and activate and self.with_activation:
                 x = self.activate(x)
         return x
+
 class Det_DarknetBottleneck(BaseModule):
     """The basic bottleneck block used in Darknet.
 
@@ -320,6 +321,7 @@ class DarknetBottleneck(Det_DarknetBottleneck):
             hidden_channels,
             out_channels,
             kernel_size[1],
+            stride=1,
             padding=padding[1],
             conv_cfg=conv_cfg,
             norm_cfg=norm_cfg,
