@@ -1,17 +1,15 @@
-import cv2
-import torch
-import torch.nn as nn
-
 from data_pre.data_preprocess import preprocess_image
 from data_pre.formatting import PackDetInputs
 from data_pre.loading import LoadImageFromFile, LoadAnnotations
 from data_pre.resize import YOLOv5KeepRatioResize, LetterResize
-from data_pre.tolabel import load_txt_to_instance_data, parse_bbox_from_file
+from data_pre.tolabel import parse_bbox_from_file
+from loss.parse_loss import parse_losses
 from model.basemodule import BaseModule
 from model.csp_darknet import YOLOv8CSPDarknet
+from model.optim import YOLOv5OptimizerConstructor
 from model.yolov8_pafpn import YOLOv8PAFPN
 from model.yolov8_head import YOLOv8Head
-from utils import stack_batch, add_pred_to_datasample
+from utils import stack_batch
 import cv2
 class Detector(BaseModule):
     def __init__(self):
@@ -23,16 +21,26 @@ class Detector(BaseModule):
         self.bbox_head = YOLOv8Head(80, [256, 512, 512],
                                     train_cfg={'assigner': {'type': 'BatchTaskAlignedAssigner', 'num_classes': 80, 'use_ciou': True, 'topk': 10, 'alpha': 0.5, 'beta': 6.0, 'eps': 1e-09}})
 
+    def set_train(self):
+        optim_wrapper_config = {'type': 'OptimWrapper', 'clip_grad': {'max_norm': 10.0}, 'optimizer': {'type': 'SGD', 'lr': 0.01, 'momentum': 0.937, 'weight_decay': 0.0005, 'nesterov': True, 'batch_size_per_gpu': 4}}
+
+        self.optim_wrapper = YOLOv5OptimizerConstructor(optim_wrapper_cfg=optim_wrapper_config,
+                                                        paramwise_cfg=None)(self)
+
+
     def forward(self, x, data_sample):
         x = preprocess_image(x, mean=[0.0, 0.0, 0.0], std=[255.0, 255.0, 255.0], bgr_to_rgb=True)
         x = self.backbone(x)
         x = self.neck(x)
         losses = self.bbox_head.loss(x, data_sample)
-        return losses
+        parsed_losses, log_vars = parse_losses(losses)
+        self.optim_wrapper.update_params(parsed_losses)
+        return log_vars
 
 def main():
 
     model = Detector()
+    model.set_train()
 
 
     # 指定输入图片的路径
