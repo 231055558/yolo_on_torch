@@ -68,7 +68,7 @@ def load_weights_with_mapping(model, weight_path):
 model = load_weights_with_mapping(model, ckp_path)
 
 # 指定输入图片的路径
-image_path = './data/dota/train/images/P0000__1024__824___0.tiff'  # 替换为你的图片路径
+image_path = './data/coco/val2017/000000000139.jpg'  # 替换为你的图片路径
 image = cv2.imread(image_path)
 transforms = []
 

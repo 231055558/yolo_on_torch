@@ -186,8 +186,7 @@ class YOLOv8HeadModule(BaseModule):
         self.reg_preds = nn.ModuleList()
 
         reg_out_channels = max(
-            (16, self.in_channels[0] // 4, self.reg_max * 4)
-        )
+            (16, self.in_channels[0] // 4, self.reg_max * 4))
         cls_out_channels = max(self.in_channels[0], self.num_classes)
 
         for i in range(self.num_levels):

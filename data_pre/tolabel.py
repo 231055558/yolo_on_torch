@@ -94,8 +94,8 @@ def parse_bbox_from_file(file_path):
                 continue  # 跳过不完整的数据行
 
             # 解析边界框的坐标
-            x_min, y_min, x_max, y_max = map(float, parts[:4])
-            class_id = 0  # 可以根据需要设置类别ID，这里默认设置为0
+            _, class_id, x_min, y_min, x_max, y_max = map(float, parts[:6])
+            # class_id = 0  # 可以根据需要设置类别ID，这里默认设置为0
 
             # 假设image_index为0，因为没有提供此信息
             image_index = 0

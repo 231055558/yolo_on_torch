@@ -1,3 +1,7 @@
+import os
+
+import torch
+
 from data_pre.data_preprocess import preprocess_image
 from data_pre.formatting import PackDetInputs
 from data_pre.loading import LoadImageFromFile, LoadAnnotations
@@ -16,9 +20,7 @@ class Detector(BaseModule):
         super().__init__(None)
         self.backbone = YOLOv8CSPDarknet(deepen_factor=1.0, widen_factor=1.0, last_stage_out_channels=512)
         self.neck = YOLOv8PAFPN([256, 512, 512], [256, 512, 512], deepen_factor=1.0, widen_factor=1.0)
-        head_cfg = {'multi_label': True, 'nms_pre': 30000, 'score_thr': 0.001,
-                    'nms': {'type': 'nms', 'iou_threshold': 0.7}, 'max_per_img': 300}
-        self.bbox_head = YOLOv8Head(80, [256, 512, 512],
+        self.bbox_head = YOLOv8Head(num_classes=80, in_channels=[256, 512, 512],
                                     train_cfg={'assigner': {'type': 'BatchTaskAlignedAssigner', 'num_classes': 80, 'use_ciou': True, 'topk': 10, 'alpha': 0.5, 'beta': 6.0, 'eps': 1e-09}})
 
     def set_train(self):
@@ -26,7 +28,6 @@ class Detector(BaseModule):
 
         self.optim_wrapper = YOLOv5OptimizerConstructor(optim_wrapper_cfg=optim_wrapper_config,
                                                         paramwise_cfg=None)(self)
-
 
     def forward(self, x, data_sample):
         x = preprocess_image(x, mean=[0.0, 0.0, 0.0], std=[255.0, 255.0, 255.0], bgr_to_rgb=True)
@@ -37,15 +38,36 @@ class Detector(BaseModule):
         self.optim_wrapper.update_params(parsed_losses)
         return log_vars
 
-def main():
+def load_weights_with_mapping(model, weight_path):
+    # 加载权重文件
+    checkpoint = torch.load(weight_path, map_location='cpu')
+    model_weights = checkpoint['state_dict'] if 'state_dict' in checkpoint else checkpoint
+
+    # # 创建一个新的字典用于存储映射后的权重
+    # new_state_dict = {}
+    # for model_key in model.state_dict().keys():
+    #     # 获取权重文件中对应的键名
+    #     # checkpoint_key = model_key.replace('stem.', 'backbone.stem.')
+    #
+    #     if model_key in model_weights:
+    #         new_state_dict[model_key] = model_weights[model_key]
+    #     else:
+    #         print(f"{model_key}: Not found in weight file.")
+
+    # 加载映射后的权重
+    model.load_state_dict(model_weights, strict=False)
+    return model
+
+def train(data_id):
 
     model = Detector()
+
     model.set_train()
 
 
     # 指定输入图片的路径
-    image_path = './data/dota/train/images/P0000__1024__0___0.tiff'  # 替换为你的图片路径
-    annfile_path = './data/dota/train/annfiles/P0000__1024__0___0.txt'
+    image_path = f'./data/coco/val2017/{data_id}.jpg'  # 替换为你的图片路径
+    annfile_path = f'./data/coco/annfiles/{data_id}.txt'
     image = cv2.imread(image_path)
 
     transforms = []
@@ -76,6 +98,23 @@ def main():
 
     print(results)
 
+def get_image_names(folder_path):
+    # 初始化一个空列表用于保存图像名称
+    image_names = []
 
+    # 遍历指定文件夹下的所有文件
+    for filename in os.listdir(folder_path):
+        # 检查文件是否以 .jpg 结尾
+        if filename.endswith('.jpg'):
+            # 去掉扩展名并添加到列表
+            image_name = os.path.splitext(filename)[0]
+            image_names.append(image_name)
+
+    return image_names
 if __name__ == '__main__':
-    main()
+    for i in get_image_names('./data/coco/val2017'):
+        try:
+            train(i)
+        except:
+            continue
+
