@@ -699,3 +699,23 @@ def samplelist_boxtype2tensor(batch_data_samples):
             bboxes = data_samples.ignored_instances.get('bboxes', None)
             if isinstance(bboxes, BaseBoxes):
                 data_samples.ignored_instances.bboxes = bboxes.tensor
+
+def load_weights_with_mapping(model, weight_path):
+    # 加载权重文件
+    checkpoint = torch.load(weight_path, map_location='cpu')
+    model_weights = checkpoint['state_dict'] if 'state_dict' in checkpoint else checkpoint
+
+    # # 创建一个新的字典用于存储映射后的权重
+    # new_state_dict = {}
+    # for model_key in model.state_dict().keys():
+    #     # 获取权重文件中对应的键名
+    #     # checkpoint_key = model_key.replace('stem.', 'backbone.stem.')
+    #
+    #     if model_key in model_weights:
+    #         new_state_dict[model_key] = model_weights[model_key]
+    #     else:
+    #         print(f"{model_key}: Not found in weight file.")
+
+    # 加载映射后的权重
+    model.load_state_dict(model_weights, strict=False)
+    return model

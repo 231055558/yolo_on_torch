@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 from typing import List, Tuple, Union, Optional
-from model.networks import BaseModule, ConvModule, CSPLayerWithTwoConv, SPPFBottleneck
+from model.networks import ConvModule, CSPLayerWithTwoConv, SPPFBottleneck
+from .basemodule import BaseModule
 from utils import make_divisible, make_round, build_plugin_layer
 
 

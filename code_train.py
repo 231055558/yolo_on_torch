@@ -1,7 +1,5 @@
 import os
 
-import torch
-
 from data_pre.data_preprocess import preprocess_image
 from data_pre.formatting import PackDetInputs
 from data_pre.loading import LoadImageFromFile, LoadAnnotations
@@ -15,6 +13,38 @@ from model.yolov8_pafpn import YOLOv8PAFPN
 from model.yolov8_head import YOLOv8Head
 from utils import stack_batch
 import cv2
+import torch
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+
+def show_image_with_boxes(img_tensor, labels_tensor, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
+    # 移除批量维度
+    img = img_tensor.squeeze(0)
+
+    # 反归一化
+    img = img * torch.tensor(std).view(-1, 1, 1) + torch.tensor(mean).view(-1, 1, 1)
+
+    # 将值缩放到[0, 255]并转换为uint8
+    img = (img * 255).clamp(0, 255).byte()
+
+    # 转换为numpy格式以便在Matplotlib中显示
+    img_np = img.permute(1, 2, 0).cpu().numpy()
+
+    # 显示图像并添加边框
+    fig, ax = plt.subplots(1, figsize=(8, 8))
+    ax.imshow(img_np)
+
+    # 绘制标签框
+    for label in labels_tensor:
+        _, _, x1, y1, x2, y2 = label  # 获取标签框的坐标
+        width, height = x2 - x1, y2 - y1
+        rect = patches.Rectangle((x1, y1), width, height, linewidth=1, edgecolor='r', facecolor='none')
+        ax.add_patch(rect)
+
+    plt.axis('off')
+    plt.show()
+
 class Detector(BaseModule):
     def __init__(self):
         super().__init__(None)
@@ -58,33 +88,37 @@ def load_weights_with_mapping(model, weight_path):
     model.load_state_dict(model_weights, strict=False)
     return model
 
-def adjust_bboxes_tensor(bboxes, ori_shape, img_shape):
-    """
-    Adjust bounding boxes based on image scaling for a specific tensor format.
+def transform_labels(labels_tensor, ori_shape, img_shape):
+    # Unpack original and target dimensions
+    ori_h, ori_w = ori_shape
+    img_h, img_w = img_shape[:2]
 
-    Args:
-        bboxes (torch.Tensor): Tensor of bounding boxes with the format [image_id, class_id, x_min, y_min, x_max, y_max].
-        ori_shape (tuple): Original image dimensions as (width, height).
-        img_shape (tuple): New image dimensions as (width, height, channels).
+    # 1. Calculate scale factors for aspect-ratio-preserving resize
+    scale_x = img_w / ori_w
+    scale_y = img_h / ori_h
+    scale = min(scale_x, scale_y)  # Choose the smallest to keep aspect ratio
 
-    Returns:
-        torch.Tensor: Adjusted bounding boxes tensor.
-    """
-    ori_w, ori_h = ori_shape
-    new_w, new_h = img_shape[:2]
+    # 2. Apply the scaling to all bounding box coordinates
+    labels_tensor[:, 2] *= scale  # x1
+    labels_tensor[:, 3] *= scale  # y1
+    labels_tensor[:, 4] *= scale  # x2
+    labels_tensor[:, 5] *= scale  # y2
 
-    # Calculate scale factors for width and height
-    scale_x = new_w / ori_w
-    scale_y = new_h / ori_h
+    # 3. Calculate padding if the aspect ratio doesn't match
+    pad_x = (img_w - ori_w * scale) / 2
+    pad_y = (img_h - ori_h * scale) / 2
 
-    # Only adjust the x_min, y_min, x_max, y_max columns (indices 2 to 5)
-    adjusted_bboxes = bboxes.clone()  # Copy to avoid modifying the original tensor
-    adjusted_bboxes[:, 2] *= scale_x  # x_min
-    adjusted_bboxes[:, 3] *= scale_y  # y_min
-    adjusted_bboxes[:, 4] *= scale_x  # x_max
-    adjusted_bboxes[:, 5] *= scale_y  # y_max
+    # 4. Adjust for padding by adding offsets
+    labels_tensor[:, 2] += pad_x  # x1
+    labels_tensor[:, 3] += pad_y  # y1
+    labels_tensor[:, 4] += pad_x  # x2
+    labels_tensor[:, 5] += pad_y  # y2
 
-    return adjusted_bboxes
+    return labels_tensor
+
+# Example usage:
+# labels_tensor = torch.tensor([[0, 0, x1, y1, x2, y2], ...])
+# adjusted_labels = transform_labels(labels_tensor)
 
 
 
@@ -99,7 +133,6 @@ def train(model, data_id):
     image = cv2.imread(image_path)
 
     transforms = []
-
     transforms.append(LoadImageFromFile())
     transforms.append(YOLOv5KeepRatioResize(scale=(640, 640)))
     transforms.append(LetterResize(scale=(640, 640), allow_scale_up=False, pad_val={'img': 114}))
@@ -118,12 +151,12 @@ def train(model, data_id):
         data_samples.metainfo for data_samples in data_['data_samples']
     ]
     instance_data = parse_bbox_from_file(annfile_path)
-    instance_data = adjust_bboxes_tensor(instance_data, data_samples['img_metas'][0]['ori_shape'], data_samples['img_metas'][0]['img_shape'])
+    instance_data = transform_labels(instance_data, data_samples['img_metas'][0]['ori_shape'], data_samples['img_metas'][0]['img_shape'])
     data_samples['bboxes_labels'] = instance_data
+    # show_image_with_boxes(data_['inputs'], instance_data)
+
 
     results = model(data_['inputs'], data_samples)
-
-
     print(results)
 
 def get_image_names(folder_path):
@@ -144,10 +177,14 @@ if __name__ == '__main__':
     model.init_weights()
     weight_path = './checkpoint/yolov8_l_syncbn_fast_8xb16-500e_coco_20230217_182526-189611b6.pth'
     # model = load_weights_with_mapping(model, weight_path=weight_path)
+
     model.set_train()
     for i in get_image_names('./data/coco/val2017'):
         try:
             train(model, i)
         except:
             print('not found')
+        # cv2.waitKey(0)
+        if i == 3:
+            break
 
